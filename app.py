@@ -246,7 +246,7 @@ if submitted:
     avg_daily_lm_total = lm_total_ewa / 31 
     avg_daily_mtd_profit = mtd_profit / hari_berjalan if hari_berjalan > 0 else 0
 
-    diff_total_ewa_mtd_Last Month = ((avg_daily_mtd_total - avg_daily_lm_total) / avg_daily_lm_total * 100) if avg_daily_lm_total > 0 else 0
+    diff_total_ewa_mtd_lm = ((avg_daily_mtd_total - avg_daily_lm_total) / avg_daily_lm_total * 100) if avg_daily_lm_total > 0 else 0
     diff_profit_daily_mtd = ((profit_ewa - avg_daily_mtd_profit) / avg_daily_mtd_profit * 100) if avg_daily_mtd_profit > 0 else 0
 
     runrate_total_ewa = avg_daily_mtd_total * 30
