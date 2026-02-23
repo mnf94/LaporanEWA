@@ -4,6 +4,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 import json
 import urllib.parse
 from datetime import datetime
+import pytz
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="Generator Laporan EWA", layout="wide", initial_sidebar_state="collapsed")
@@ -68,7 +69,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- FUNGSI HELPER ---
+# --- FUNGSI HELPER WAKTU (ZONA WIB) ---
+def get_current_time_wib():
+    tz = pytz.timezone('Asia/Jakarta')
+    now = datetime.now(tz)
+    return now.strftime("%d %B %Y - %H:%M:%S WIB")
+
+# --- FUNGSI HELPER ANGKA ---
 def format_rp(angka):
     try:
         if angka is None or angka == "": return "Rp 0"
@@ -78,7 +85,6 @@ def format_rp(angka):
         return "Rp 0"
 
 def safe_int(value, default=0):
-    """Penyelamat Angka: Mencegah error jika data dari Google Sheets kosong (blank)"""
     try:
         if value is None or str(value).strip() == "":
             return default
@@ -86,7 +92,7 @@ def safe_int(value, default=0):
     except (ValueError, TypeError):
         return default
 
-# --- KONEKSI GOOGLE SHEETS ---
+# --- FUNGSI KONEKSI GOOGLE SHEETS ---
 def connect_google_sheets():
     try:
         scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
@@ -118,161 +124,201 @@ def save_history_data(sheet, data_dict):
         except Exception as e:
             st.error(f"Gagal menyimpan ke Google Sheets: {e}")
 
-# Inisialisasi DB
-db_sheet = connect_google_sheets()
-history = get_history_data(db_sheet)
+# --- LOGIKA LOGIN SISTEM ---
+def check_login():
+    if "logged_in" not in st.session_state:
+        st.session_state["logged_in"] = False
 
-# --- ANTARMUKA STREAMLIT ---
-st.title("✨ Laporan EWA & PPOB Automator")
+    if not st.session_state["logged_in"]:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("<br><br><br>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center; color: #0ea5e9;'>🔐 Login EWA Automator</h2>", unsafe_allow_html=True)
+            with st.form("login_form"):
+                username = st.text_input("Username")
+                password = st.text_input("Password", type="password")
+                submit = st.form_submit_button("Masuk", type="primary")
 
-if db_sheet is None:
-    st.warning("⚠️ **Google Sheets Belum Terhubung.** Form berjalan tanpa histori. Pastikan secrets.toml sudah diatur.")
-else:
-    st.success("✅ Terhubung ke Google Sheets! Data histori MTD & Bulan Lalu otomatis terisi.")
+                if submit:
+                    # Validasi dengan data di secrets.toml bagian [users]
+                    if "users" in st.secrets and username in st.secrets["users"]:
+                        if st.secrets["users"][username] == password:
+                            st.session_state["logged_in"] = True
+                            st.session_state["username"] = username
+                            st.rerun()
+                        else:
+                            st.error("❌ Password salah!")
+                    else:
+                        st.error("❌ Username tidak ditemukan!")
+        return False
+    return True
 
-with st.form("report_form"):
-    st.markdown("### 📅 Informasi Umum")
-    col_info1, col_info2 = st.columns(2)
-    with col_info1:
-        tanggal_laporan = st.text_input("Tanggal Laporan", value=datetime.now().strftime('%d %B %Y'))
-    with col_info2:
-        hari_berjalan = st.number_input("Hari Berjalan Bulan Ini", min_value=1, value=int(datetime.now().strftime('%d')), format="%d")
-
-    st.markdown("### 📊 1. Report Hari Ini")
-    st.markdown("*Ket: Kosongkan jika tidak ada data. Angka otomatis diformat tanpa desimal.*")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        qty_ewa = st.number_input("Total Qty EWA", value=None, min_value=0, format="%d", step=1)
-        total_ewa = st.number_input("Total EWA (Rp)", value=None, min_value=0, format="%d", step=1)
-        admin_ewa = st.number_input("Total Biaya Admin (Rp)", value=None, min_value=0, format="%d", step=1)
-        transfer_ewa = st.number_input("Total Biaya Transfer (Rp)", value=None, min_value=0, format="%d", step=1)
-    with col2:
-        profit_ewa = st.number_input("Total Profit (Rp)", value=None, min_value=0, format="%d", step=1)
-        xendit_ewa = st.number_input("Total Transfer Xendit (Rp)", value=None, min_value=0, format="%d", step=1)
-        finlink_ewa = st.number_input("Total Transfer Finlink (Rp)", value=None, min_value=0, format="%d", step=1)
-        pending_ewa = st.number_input("EWA Pending (Qty)", value=None, min_value=0, format="%d", step=1)
-    with col3:
-        qty_ppob = st.number_input("Total Qty EWA PPOB", value=None, min_value=0, format="%d", step=1)
-        ewa_ppob = st.number_input("Total EWA PPOB (Rp)", value=None, min_value=0, format="%d", step=1)
-        admin_ppob = st.number_input("Total Biaya Admin PPOB (Rp)", value=None, min_value=0, format="%d", step=1)
-
-    st.markdown("### 💳 2. Saldo PPOB & Payment Gateway")
-    col4, col5 = st.columns(2)
-    with col4:
-        saldo_alterra = st.number_input("Saldo PPOB Alterra (Rp)", value=None, min_value=0, format="%d", step=1)
-        saldo_pelangi = st.number_input("Saldo PPOB Pelangi (Rp)", value=None, min_value=0, format="%d", step=1)
-        saldo_uv = st.number_input("Saldo PPOB Ultra Voucher (Rp)", value=None, min_value=0, format="%d", step=1)
-    with col5:
-        saldo_xendit = st.number_input("Saldo PG Xendit (Rp)", value=None, min_value=0, format="%d", step=1)
-        saldo_finlink = st.number_input("Saldo PG Finlink (Rp)", value=None, min_value=0, format="%d", step=1)
-
-    st.markdown("### 📈 3. Report Bulan Berjalan (MTD)")
-    mtd_periode = st.text_input("Periode MTD", value=history.get("mtd_periode", "1 - 20 Februari 2026"))
-    col6, col7, col8 = st.columns(3)
-    with col6:
-        mtd_qty_ewa = st.number_input("MTD Qty EWA", value=safe_int(history.get("mtd_qty_ewa", 0)), min_value=0, format="%d")
-        mtd_total_ewa = st.number_input("MTD Total EWA (Rp)", value=safe_int(history.get("mtd_total_ewa", 0)), min_value=0, format="%d")
-        mtd_admin = st.number_input("MTD Biaya Admin (Rp)", value=safe_int(history.get("mtd_admin", 0)), min_value=0, format="%d")
-        mtd_transfer = st.number_input("MTD Biaya Transfer (Rp)", value=safe_int(history.get("mtd_transfer", 0)), min_value=0, format="%d")
-    with col7:
-        mtd_profit = st.number_input("MTD Profit (Rp)", value=safe_int(history.get("mtd_profit", 0)), min_value=0, format="%d")
-        mtd_xendit = st.number_input("MTD Trf Xendit (Rp)", value=safe_int(history.get("mtd_xendit", 0)), min_value=0, format="%d")
-        mtd_finlink = st.number_input("MTD Trf Finlink (Rp)", value=safe_int(history.get("mtd_finlink", 0)), min_value=0, format="%d")
-    with col8:
-        mtd_qty_ppob = st.number_input("MTD Qty PPOB", value=safe_int(history.get("mtd_qty_ppob", 0)), min_value=0, format="%d")
-        mtd_ewa_ppob = st.number_input("MTD EWA PPOB (Rp)", value=safe_int(history.get("mtd_ewa_ppob", 0)), min_value=0, format="%d")
-        mtd_admin_ppob = st.number_input("MTD Admin PPOB (Rp)", value=safe_int(history.get("mtd_admin_ppob", 0)), min_value=0, format="%d")
-
-    st.markdown("### 🔙 4. Report Bulan Lalu")
-    lm_periode = st.text_input("Periode Bulan Lalu", value=history.get("lm_periode", "1 - 31 Januari 2026"))
-    col9, col10, col11 = st.columns(3)
-    with col9:
-        lm_qty_ewa = st.number_input("Last Month Qty EWA", value=safe_int(history.get("lm_qty_ewa", 0)), min_value=0, format="%d")
-        lm_total_ewa = st.number_input("Last Month Total EWA (Rp)", value=safe_int(history.get("lm_total_ewa", 0)), min_value=0, format="%d")
-        lm_admin = st.number_input("Last Month Biaya Admin (Rp)", value=safe_int(history.get("lm_admin", 0)), min_value=0, format="%d")
-        lm_transfer = st.number_input("Last Month Biaya Transfer (Rp)", value=safe_int(history.get("lm_transfer", 0)), min_value=0, format="%d")
-    with col10:
-        lm_profit = st.number_input("Last Month Profit (Rp)", value=safe_int(history.get("lm_profit", 0)), min_value=0, format="%d")
-        lm_xendit = st.number_input("Last Month Trf Xendit (Rp)", value=safe_int(history.get("lm_xendit", 0)), min_value=0, format="%d")
-        lm_finlink = st.number_input("Last Month Trf Finlink (Rp)", value=safe_int(history.get("lm_finlink", 0)), min_value=0, format="%d")
-    with col11:
-        lm_qty_ppob = st.number_input("Last Month Qty PPOB", value=safe_int(history.get("lm_qty_ppob", 0)), min_value=0, format="%d")
-        lm_ewa_ppob = st.number_input("Last Month EWA PPOB (Rp)", value=safe_int(history.get("lm_ewa_ppob", 0)), min_value=0, format="%d")
-        lm_admin_ppob = st.number_input("Last Month Admin PPOB (Rp)", value=safe_int(history.get("lm_admin_ppob", 0)), min_value=0, format="%d")
-
-    submitted = st.form_submit_button("Generate Laporan HTML", type="primary")
-
-if submitted:
-    # Set default 0 jika dibiarkan kosong
-    qty_ewa = safe_int(qty_ewa)
-    total_ewa = safe_int(total_ewa)
-    admin_ewa = safe_int(admin_ewa)
-    transfer_ewa = safe_int(transfer_ewa)
-    profit_ewa = safe_int(profit_ewa)
-    xendit_ewa = safe_int(xendit_ewa)
-    finlink_ewa = safe_int(finlink_ewa)
-    pending_ewa = safe_int(pending_ewa)
-    qty_ppob = safe_int(qty_ppob)
-    ewa_ppob = safe_int(ewa_ppob)
-    admin_ppob = safe_int(admin_ppob)
-    saldo_alterra = safe_int(saldo_alterra)
-    saldo_pelangi = safe_int(saldo_pelangi)
-    saldo_uv = safe_int(saldo_uv)
-    saldo_xendit = safe_int(saldo_xendit)
-    saldo_finlink = safe_int(saldo_finlink)
-
-    # Simpan ke Google Sheets
-    new_history = {
-        "timestamp": str(datetime.now()),
-        "mtd_periode": mtd_periode, "mtd_qty_ewa": mtd_qty_ewa, "mtd_total_ewa": mtd_total_ewa,
-        "mtd_admin": mtd_admin, "mtd_transfer": mtd_transfer, "mtd_profit": mtd_profit,
-        "mtd_xendit": mtd_xendit, "mtd_finlink": mtd_finlink, "mtd_qty_ppob": mtd_qty_ppob,
-        "mtd_ewa_ppob": mtd_ewa_ppob, "mtd_admin_ppob": mtd_admin_ppob,
-        "lm_periode": lm_periode, "lm_qty_ewa": lm_qty_ewa, "lm_total_ewa": lm_total_ewa,
-        "lm_admin": lm_admin, "lm_transfer": lm_transfer, "lm_profit": lm_profit,
-        "lm_xendit": lm_xendit, "lm_finlink": lm_finlink, "lm_qty_ppob": lm_qty_ppob,
-        "lm_ewa_ppob": lm_ewa_ppob, "lm_admin_ppob": lm_admin_ppob
-    }
-    save_history_data(db_sheet, new_history)
-
-    # --- KALKULASI INSIGHT ---
-    avg_ewa_per_trx = total_ewa / qty_ewa if qty_ewa > 0 else 0
-    fee_per_trx = profit_ewa / qty_ewa if qty_ewa > 0 else 0
-    margin_pct = (profit_ewa / total_ewa * 100) if total_ewa > 0 else 0
-    pending_pct = (pending_ewa / qty_ewa * 100) if qty_ewa > 0 else 0
-    margin_mtd_pct = (mtd_profit / mtd_total_ewa * 100) if mtd_total_ewa > 0 else 0
-
-    avg_daily_mtd_total = mtd_total_ewa / hari_berjalan if hari_berjalan > 0 else 0
-    avg_daily_lm_total = lm_total_ewa / 31 
-    avg_daily_mtd_profit = mtd_profit / hari_berjalan if hari_berjalan > 0 else 0
-
-    diff_total_ewa_mtd_lm = ((avg_daily_mtd_total - avg_daily_lm_total) / avg_daily_lm_total * 100) if avg_daily_lm_total > 0 else 0
-    diff_profit_daily_mtd = ((profit_ewa - avg_daily_mtd_profit) / avg_daily_mtd_profit * 100) if avg_daily_mtd_profit > 0 else 0
-
-    runrate_total_ewa = avg_daily_mtd_total * 30
-    runrate_profit = avg_daily_mtd_profit * 30
-
-    margin_badge = '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;">Hijau</span>' if margin_pct >= 4 else '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;">Kuning</span>' if margin_pct >= 3 else '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:700;">Merah</span>'
+# --- MENJALANKAN APLIKASI UTAMA (JIKA SUDAH LOGIN) ---
+if check_login():
     
-    pending_badge = '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;">Aman</span>' if pending_pct < 10 else '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;">Waspada</span>' if pending_pct < 20 else '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:700;">Bahaya</span>'
+    # Inisialisasi DB
+    db_sheet = connect_google_sheets()
+    history = get_history_data(db_sheet)
 
-    alert_box = f'<tr><td style="padding:0 24px 16px 24px;"><table width="100%" style="background:#fee2e2;border:1px solid #ef4444;border-radius:12px;"><tr><td style="padding:12px 14px;color:#991b1b;font-weight:700;font-size:14px;">PERINGATAN KRITIS: Rasio Pending Tinggi</td></tr><tr><td style="padding:0 14px 12px 14px;color:#7f1d1d;font-size:13px;">Terdapat <b>{int(pending_ewa)} transaksi pending</b> dari total {int(qty_ewa)} transaksi EWA hari ini. Rasio menembus <b>{pending_pct:.2f}%</b>. Mohon segera periksa koneksi payment gateway!</td></tr></table></td></tr>' if pending_pct >= 20 else ""
+    # --- HEADER & TOMBOL LOGOUT ---
+    col_title, col_logout = st.columns([4, 1])
+    with col_title:
+        st.title("✨ Laporan EWA & PPOB Automator")
+    with col_logout:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state["logged_in"] = False
+            st.session_state["username"] = ""
+            st.rerun()
 
-    # Generate Chart URLs
-    chart1_url = "https://quickchart.io/chart?c=" + urllib.parse.quote(json.dumps({
-        "type": "bar", "data": {"labels": ["Total EWA", "Profit", "Trf Xendit", "EWA PPOB"], "datasets": [
-            {"label": "MTD", "data": [mtd_total_ewa, mtd_profit, mtd_xendit, mtd_ewa_ppob], "backgroundColor": "#0ea5e9"},
-            {"label": "Bulan Lalu", "data": [lm_total_ewa, lm_profit, lm_xendit, lm_ewa_ppob], "backgroundColor": "#f97316"}]}
-    }))
+    # --- STATUS KONEKSI & CATATAN PEMBUAT TERAKHIR ---
+    if db_sheet is None:
+        st.warning("⚠️ **Google Sheets Belum Terhubung.** Form berjalan tanpa histori.")
+    else:
+        st.success("✅ Terhubung ke Google Sheets! Data histori otomatis ditarik.")
+        
+        # Mengambil siapa dan kapan laporan terakhir dibuat dari JSON/Sheets
+        last_user = history.get("created_by", "-")
+        last_time = history.get("timestamp", "-")
+        
+        if last_user != "-":
+            st.info(f"🕒 **Laporan sebelumnya digenerate oleh:** `{last_user}` | **Waktu:** `{last_time}`")
 
-    chart2_url = "https://quickchart.io/chart?c=" + urllib.parse.quote(json.dumps({
-        "type": "bar", "data": {"labels": ["Qty EWA", "Qty PPOB"], "datasets": [
-            {"label": "MTD", "data": [mtd_qty_ewa, mtd_qty_ppob], "backgroundColor": "#0ea5e9"},
-            {"label": "Bulan Lalu", "data": [lm_qty_ewa, lm_qty_ppob], "backgroundColor": "#f97316"}]}
-    }))
+    # --- ANTARMUKA FORM ---
+    with st.form("report_form"):
+        st.markdown("### 📅 Informasi Umum")
+        col_info1, col_info2 = st.columns(2)
+        with col_info1:
+            tanggal_laporan = st.text_input("Tanggal Laporan (Muncul di HTML)", value=datetime.now().strftime('%d %B %Y'))
+        with col_info2:
+            hari_berjalan = st.number_input("Hari Berjalan Bulan Ini (Utk Proyeksi)", min_value=1, value=int(datetime.now().strftime('%d')), format="%d")
 
-    # --- HTML RENDER ---
-    html_output = f"""<!DOCTYPE html>
+        st.markdown("### 📊 1. Report Hari Ini")
+        st.markdown("*Ket: Kosongkan jika tidak ada data. Angka otomatis diformat tanpa desimal.*")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            qty_ewa = st.number_input("Total Qty EWA", value=None, min_value=0, format="%d", step=1)
+            total_ewa = st.number_input("Total EWA (Rp)", value=None, min_value=0, format="%d", step=1)
+            admin_ewa = st.number_input("Total Biaya Admin (Rp)", value=None, min_value=0, format="%d", step=1)
+            transfer_ewa = st.number_input("Total Biaya Transfer (Rp)", value=None, min_value=0, format="%d", step=1)
+        with col2:
+            profit_ewa = st.number_input("Total Profit (Rp)", value=None, min_value=0, format="%d", step=1)
+            xendit_ewa = st.number_input("Total Transfer Xendit (Rp)", value=None, min_value=0, format="%d", step=1)
+            finlink_ewa = st.number_input("Total Transfer Finlink (Rp)", value=None, min_value=0, format="%d", step=1)
+            pending_ewa = st.number_input("EWA Pending (Qty)", value=None, min_value=0, format="%d", step=1)
+        with col3:
+            qty_ppob = st.number_input("Total Qty EWA PPOB", value=None, min_value=0, format="%d", step=1)
+            ewa_ppob = st.number_input("Total EWA PPOB (Rp)", value=None, min_value=0, format="%d", step=1)
+            admin_ppob = st.number_input("Total Biaya Admin PPOB (Rp)", value=None, min_value=0, format="%d", step=1)
+
+        st.markdown("### 💳 2. Saldo PPOB & Payment Gateway")
+        col4, col5 = st.columns(2)
+        with col4:
+            saldo_alterra = st.number_input("Saldo PPOB Alterra (Rp)", value=None, min_value=0, format="%d", step=1)
+            saldo_pelangi = st.number_input("Saldo PPOB Pelangi (Rp)", value=None, min_value=0, format="%d", step=1)
+            saldo_uv = st.number_input("Saldo PPOB Ultra Voucher (Rp)", value=None, min_value=0, format="%d", step=1)
+        with col5:
+            saldo_xendit = st.number_input("Saldo PG Xendit (Rp)", value=None, min_value=0, format="%d", step=1)
+            saldo_finlink = st.number_input("Saldo PG Finlink (Rp)", value=None, min_value=0, format="%d", step=1)
+
+        st.markdown("### 📈 3. Report Bulan Berjalan (MTD)")
+        mtd_periode = st.text_input("Periode MTD", value=history.get("mtd_periode", "1 - 20 Februari 2026"))
+        col6, col7, col8 = st.columns(3)
+        with col6:
+            mtd_qty_ewa = st.number_input("MTD Qty EWA", value=safe_int(history.get("mtd_qty_ewa", 0)), min_value=0, format="%d")
+            mtd_total_ewa = st.number_input("MTD Total EWA (Rp)", value=safe_int(history.get("mtd_total_ewa", 0)), min_value=0, format="%d")
+            mtd_admin = st.number_input("MTD Biaya Admin (Rp)", value=safe_int(history.get("mtd_admin", 0)), min_value=0, format="%d")
+            mtd_transfer = st.number_input("MTD Biaya Transfer (Rp)", value=safe_int(history.get("mtd_transfer", 0)), min_value=0, format="%d")
+        with col7:
+            mtd_profit = st.number_input("MTD Profit (Rp)", value=safe_int(history.get("mtd_profit", 0)), min_value=0, format="%d")
+            mtd_xendit = st.number_input("MTD Trf Xendit (Rp)", value=safe_int(history.get("mtd_xendit", 0)), min_value=0, format="%d")
+            mtd_finlink = st.number_input("MTD Trf Finlink (Rp)", value=safe_int(history.get("mtd_finlink", 0)), min_value=0, format="%d")
+        with col8:
+            mtd_qty_ppob = st.number_input("MTD Qty PPOB", value=safe_int(history.get("mtd_qty_ppob", 0)), min_value=0, format="%d")
+            mtd_ewa_ppob = st.number_input("MTD EWA PPOB (Rp)", value=safe_int(history.get("mtd_ewa_ppob", 0)), min_value=0, format="%d")
+            mtd_admin_ppob = st.number_input("MTD Admin PPOB (Rp)", value=safe_int(history.get("mtd_admin_ppob", 0)), min_value=0, format="%d")
+
+        st.markdown("### 🔙 4. Report Bulan Lalu")
+        lm_periode = st.text_input("Periode Bulan Lalu", value=history.get("lm_periode", "1 - 31 Januari 2026"))
+        col9, col10, col11 = st.columns(3)
+        with col9:
+            lm_qty_ewa = st.number_input("Last Month Qty EWA", value=safe_int(history.get("lm_qty_ewa", 0)), min_value=0, format="%d")
+            lm_total_ewa = st.number_input("Last Month Total EWA (Rp)", value=safe_int(history.get("lm_total_ewa", 0)), min_value=0, format="%d")
+            lm_admin = st.number_input("Last Month Biaya Admin (Rp)", value=safe_int(history.get("lm_admin", 0)), min_value=0, format="%d")
+            lm_transfer = st.number_input("Last Month Biaya Transfer (Rp)", value=safe_int(history.get("lm_transfer", 0)), min_value=0, format="%d")
+        with col10:
+            lm_profit = st.number_input("Last Month Profit (Rp)", value=safe_int(history.get("lm_profit", 0)), min_value=0, format="%d")
+            lm_xendit = st.number_input("Last Month Trf Xendit (Rp)", value=safe_int(history.get("lm_xendit", 0)), min_value=0, format="%d")
+            lm_finlink = st.number_input("Last Month Trf Finlink (Rp)", value=safe_int(history.get("lm_finlink", 0)), min_value=0, format="%d")
+        with col11:
+            lm_qty_ppob = st.number_input("Last Month Qty PPOB", value=safe_int(history.get("lm_qty_ppob", 0)), min_value=0, format="%d")
+            lm_ewa_ppob = st.number_input("Last Month EWA PPOB (Rp)", value=safe_int(history.get("lm_ewa_ppob", 0)), min_value=0, format="%d")
+            lm_admin_ppob = st.number_input("Last Month Admin PPOB (Rp)", value=safe_int(history.get("lm_admin_ppob", 0)), min_value=0, format="%d")
+
+        submitted = st.form_submit_button("Generate Laporan HTML", type="primary")
+
+    if submitted:
+        # Set default 0 jika dibiarkan kosong
+        qty_ewa = safe_int(qty_ewa); total_ewa = safe_int(total_ewa); admin_ewa = safe_int(admin_ewa)
+        transfer_ewa = safe_int(transfer_ewa); profit_ewa = safe_int(profit_ewa); xendit_ewa = safe_int(xendit_ewa)
+        finlink_ewa = safe_int(finlink_ewa); pending_ewa = safe_int(pending_ewa); qty_ppob = safe_int(qty_ppob)
+        ewa_ppob = safe_int(ewa_ppob); admin_ppob = safe_int(admin_ppob); saldo_alterra = safe_int(saldo_alterra)
+        saldo_pelangi = safe_int(saldo_pelangi); saldo_uv = safe_int(saldo_uv)
+        saldo_xendit = safe_int(saldo_xendit); saldo_finlink = safe_int(saldo_finlink)
+
+        # Simpan ke Google Sheets (beserta Pembuat & Waktu)
+        new_history = {
+            "created_by": st.session_state["username"],
+            "timestamp": get_current_time_wib(),
+            "mtd_periode": mtd_periode, "mtd_qty_ewa": mtd_qty_ewa, "mtd_total_ewa": mtd_total_ewa,
+            "mtd_admin": mtd_admin, "mtd_transfer": mtd_transfer, "mtd_profit": mtd_profit,
+            "mtd_xendit": mtd_xendit, "mtd_finlink": mtd_finlink, "mtd_qty_ppob": mtd_qty_ppob,
+            "mtd_ewa_ppob": mtd_ewa_ppob, "mtd_admin_ppob": mtd_admin_ppob,
+            "lm_periode": lm_periode, "lm_qty_ewa": lm_qty_ewa, "lm_total_ewa": lm_total_ewa,
+            "lm_admin": lm_admin, "lm_transfer": lm_transfer, "lm_profit": lm_profit,
+            "lm_xendit": lm_xendit, "lm_finlink": lm_finlink, "lm_qty_ppob": lm_qty_ppob,
+            "lm_ewa_ppob": lm_ewa_ppob, "lm_admin_ppob": lm_admin_ppob
+        }
+        save_history_data(db_sheet, new_history)
+
+        # --- KALKULASI INSIGHT ---
+        avg_ewa_per_trx = total_ewa / qty_ewa if qty_ewa > 0 else 0
+        fee_per_trx = profit_ewa / qty_ewa if qty_ewa > 0 else 0
+        margin_pct = (profit_ewa / total_ewa * 100) if total_ewa > 0 else 0
+        pending_pct = (pending_ewa / qty_ewa * 100) if qty_ewa > 0 else 0
+        margin_mtd_pct = (mtd_profit / mtd_total_ewa * 100) if mtd_total_ewa > 0 else 0
+
+        avg_daily_mtd_total = mtd_total_ewa / hari_berjalan if hari_berjalan > 0 else 0
+        avg_daily_lm_total = lm_total_ewa / 31 
+        avg_daily_mtd_profit = mtd_profit / hari_berjalan if hari_berjalan > 0 else 0
+
+        diff_total_ewa_mtd_lm = ((avg_daily_mtd_total - avg_daily_lm_total) / avg_daily_lm_total * 100) if avg_daily_lm_total > 0 else 0
+        diff_profit_daily_mtd = ((profit_ewa - avg_daily_mtd_profit) / avg_daily_mtd_profit * 100) if avg_daily_mtd_profit > 0 else 0
+
+        runrate_total_ewa = avg_daily_mtd_total * 30
+        runrate_profit = avg_daily_mtd_profit * 30
+
+        margin_badge = '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;">Hijau</span>' if margin_pct >= 4 else '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;">Kuning</span>' if margin_pct >= 3 else '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:700;">Merah</span>'
+        
+        pending_badge = '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#dcfce7;color:#166534;font-size:11px;font-weight:700;">Aman</span>' if pending_pct < 10 else '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:11px;font-weight:700;">Waspada</span>' if pending_pct < 20 else '<span style="display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:#fee2e2;color:#991b1b;font-size:11px;font-weight:700;">Bahaya</span>'
+
+        alert_box = f'<tr><td style="padding:0 24px 16px 24px;"><table width="100%" style="background:#fee2e2;border:1px solid #ef4444;border-radius:12px;"><tr><td style="padding:12px 14px;color:#991b1b;font-weight:700;font-size:14px;">PERINGATAN KRITIS: Rasio Pending Tinggi</td></tr><tr><td style="padding:0 14px 12px 14px;color:#7f1d1d;font-size:13px;">Terdapat <b>{int(pending_ewa)} transaksi pending</b> dari total {int(qty_ewa)} transaksi EWA hari ini. Rasio menembus <b>{pending_pct:.2f}%</b>. Mohon segera periksa koneksi payment gateway!</td></tr></table></td></tr>' if pending_pct >= 20 else ""
+
+        # Generate Chart URLs
+        chart1_url = "https://quickchart.io/chart?c=" + urllib.parse.quote(json.dumps({
+            "type": "bar", "data": {"labels": ["Total EWA", "Profit", "Trf Xendit", "EWA PPOB"], "datasets": [
+                {"label": "MTD", "data": [mtd_total_ewa, mtd_profit, mtd_xendit, mtd_ewa_ppob], "backgroundColor": "#0ea5e9"},
+                {"label": "Bulan Lalu", "data": [lm_total_ewa, lm_profit, lm_xendit, lm_ewa_ppob], "backgroundColor": "#f97316"}]}
+        }))
+
+        chart2_url = "https://quickchart.io/chart?c=" + urllib.parse.quote(json.dumps({
+            "type": "bar", "data": {"labels": ["Qty EWA", "Qty PPOB"], "datasets": [
+                {"label": "MTD", "data": [mtd_qty_ewa, mtd_qty_ppob], "backgroundColor": "#0ea5e9"},
+                {"label": "Bulan Lalu", "data": [lm_qty_ewa, lm_qty_ppob], "backgroundColor": "#f97316"}]}
+        }))
+
+        # --- HTML RENDER ---
+        html_output = f"""<!DOCTYPE html>
 <html lang="id">
 <head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Laporan EWA & PPOB</title></head>
 <body style="margin:0;padding:0;background:#f1f5f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
@@ -355,7 +401,7 @@ if submitted:
 <tr><td style="padding:0 24px 24px 24px;"><table width="100%"><tr><td style="height:2px;background:#f97316;line-height:2px;font-size:2px;">&nbsp;</td></tr><tr><td style="padding-top:10px;color:#64748b;font-size:12px;text-align:center;">Disusun otomatis • Byru HRIS — EWA Performance Snapshot</td></tr></table></td></tr>
 </table></td></tr></table></body></html>"""
 
-    st.success("🎉 Laporan berhasil di-generate!")
-    st.text_area("📋 Silakan Copy Kode HTML Laporan di Bawah Ini:", value=html_output, height=200)
-    st.markdown("### 👀 Preview Laporan Visual")
-    st.components.v1.html(html_output, height=800, scrolling=True)
+        st.success("🎉 Laporan berhasil di-generate dan Histori telah disimpan di Google Sheets!")
+        st.text_area("📋 Silakan Copy Kode HTML Laporan di Bawah Ini:", value=html_output, height=200)
+        st.markdown("### 👀 Preview Laporan Visual")
+        st.components.v1.html(html_output, height=800, scrolling=True)
