@@ -187,18 +187,18 @@ with st.form("report_form"):
     lm_periode = st.text_input("Periode Bulan Lalu", value=history.get("lm_periode", "1 - 31 Januari 2026"))
     col9, col10, col11 = st.columns(3)
     with col9:
-        lm_qty_ewa = st.number_input("LM Qty EWA", value=safe_int(history.get("lm_qty_ewa", 0)), min_value=0, format="%d")
-        lm_total_ewa = st.number_input("LM Total EWA (Rp)", value=safe_int(history.get("lm_total_ewa", 0)), min_value=0, format="%d")
-        lm_admin = st.number_input("LM Biaya Admin (Rp)", value=safe_int(history.get("lm_admin", 0)), min_value=0, format="%d")
-        lm_transfer = st.number_input("LM Biaya Transfer (Rp)", value=safe_int(history.get("lm_transfer", 0)), min_value=0, format="%d")
+        lm_qty_ewa = st.number_input("Last Month Qty EWA", value=safe_int(history.get("lm_qty_ewa", 0)), min_value=0, format="%d")
+        lm_total_ewa = st.number_input("Last Month Total EWA (Rp)", value=safe_int(history.get("lm_total_ewa", 0)), min_value=0, format="%d")
+        lm_admin = st.number_input("Last Month Biaya Admin (Rp)", value=safe_int(history.get("lm_admin", 0)), min_value=0, format="%d")
+        lm_transfer = st.number_input("Last Month Biaya Transfer (Rp)", value=safe_int(history.get("lm_transfer", 0)), min_value=0, format="%d")
     with col10:
-        lm_profit = st.number_input("LM Profit (Rp)", value=safe_int(history.get("lm_profit", 0)), min_value=0, format="%d")
-        lm_xendit = st.number_input("LM Trf Xendit (Rp)", value=safe_int(history.get("lm_xendit", 0)), min_value=0, format="%d")
-        lm_finlink = st.number_input("LM Trf Finlink (Rp)", value=safe_int(history.get("lm_finlink", 0)), min_value=0, format="%d")
+        lm_profit = st.number_input("Last Month Profit (Rp)", value=safe_int(history.get("lm_profit", 0)), min_value=0, format="%d")
+        lm_xendit = st.number_input("Last Month Trf Xendit (Rp)", value=safe_int(history.get("lm_xendit", 0)), min_value=0, format="%d")
+        lm_finlink = st.number_input("Last Month Trf Finlink (Rp)", value=safe_int(history.get("lm_finlink", 0)), min_value=0, format="%d")
     with col11:
-        lm_qty_ppob = st.number_input("LM Qty PPOB", value=safe_int(history.get("lm_qty_ppob", 0)), min_value=0, format="%d")
-        lm_ewa_ppob = st.number_input("LM EWA PPOB (Rp)", value=safe_int(history.get("lm_ewa_ppob", 0)), min_value=0, format="%d")
-        lm_admin_ppob = st.number_input("LM Admin PPOB (Rp)", value=safe_int(history.get("lm_admin_ppob", 0)), min_value=0, format="%d")
+        lm_qty_ppob = st.number_input("Last Month Qty PPOB", value=safe_int(history.get("lm_qty_ppob", 0)), min_value=0, format="%d")
+        lm_ewa_ppob = st.number_input("Last Month EWA PPOB (Rp)", value=safe_int(history.get("lm_ewa_ppob", 0)), min_value=0, format="%d")
+        lm_admin_ppob = st.number_input("Last Month Admin PPOB (Rp)", value=safe_int(history.get("lm_admin_ppob", 0)), min_value=0, format="%d")
 
     submitted = st.form_submit_button("Generate Laporan HTML", type="primary")
 
@@ -246,7 +246,7 @@ if submitted:
     avg_daily_lm_total = lm_total_ewa / 31 
     avg_daily_mtd_profit = mtd_profit / hari_berjalan if hari_berjalan > 0 else 0
 
-    diff_total_ewa_mtd_lm = ((avg_daily_mtd_total - avg_daily_lm_total) / avg_daily_lm_total * 100) if avg_daily_lm_total > 0 else 0
+    diff_total_ewa_mtd_Last Month = ((avg_daily_mtd_total - avg_daily_lm_total) / avg_daily_lm_total * 100) if avg_daily_lm_total > 0 else 0
     diff_profit_daily_mtd = ((profit_ewa - avg_daily_mtd_profit) / avg_daily_mtd_profit * 100) if avg_daily_mtd_profit > 0 else 0
 
     runrate_total_ewa = avg_daily_mtd_total * 30
