@@ -340,7 +340,7 @@ if check_login():
                     
                     xendit_list = []
                     finlink_list = []
-                    xendit_kws = ['OCBC', 'BSI', 'ALLO', 'BANTEN', 'BRI', 'BCA', 'JAGO', 'ARTOS', 'DANA', 'SHOPEE', 'NEO', 'SEA', 'KESEJAHTERAAN_EKONOMI', 'GOPAY', 'YUDHA_BHAKTI']
+                    xendit_kws = ['OCBC', 'NEO']
                     
                     for _, row in df_approved.iterrows():
                         bank_code = str(row.get('BANK', '')).strip()
