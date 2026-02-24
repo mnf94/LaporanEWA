@@ -259,8 +259,6 @@ if check_login():
             fee_per_trx = profit_ewa / qty_ewa if qty_ewa > 0 else 0
             margin_pct = (profit_ewa / total_ewa * 100) if total_ewa > 0 else 0
             pending_pct = (pending_ewa / qty_ewa * 100) if qty_ewa > 0 else 0
-            
-            # --- INI BARIS YANG HILANG DAN SUDAH DIKEMBALIKAN ---
             margin_mtd_pct = (mtd_profit / mtd_total_ewa * 100) if mtd_total_ewa > 0 else 0
             
             avg_daily_mtd_total = mtd_total_ewa / hari_berjalan if hari_berjalan > 0 else 0
@@ -313,17 +311,15 @@ if check_login():
                 # 2. BERSIHKAN HEADER BAWAAN
                 df_raw.columns = df_raw.columns.astype(str).str.strip().str.upper()
 
-                # 3. AUTO-DETECT HEADER (Mata X-Ray untuk melewati baris kosong/judul dokumen)
+                # 3. AUTO-DETECT HEADER
                 if 'STATUS' not in df_raw.columns:
                     header_row_idx = -1
-                    # Cek 15 baris pertama, cari kata STATUS
                     for idx, row in df_raw.head(15).iterrows():
                         if any('STATUS' == str(val).strip().upper() for val in row):
                             header_row_idx = idx
                             break
                     
                     if header_row_idx != -1:
-                        # Jadikan baris tersebut sebagai header asli
                         new_header = df_raw.iloc[header_row_idx].astype(str).str.strip().str.upper()
                         df_raw = df_raw[header_row_idx + 1:].copy()
                         df_raw.columns = new_header
@@ -340,7 +336,7 @@ if check_login():
                     
                     xendit_list = []
                     finlink_list = []
-                    xendit_kws = ['OCBC', 'NEO']
+                    xendit_kws = ['OCBC', 'BSI', 'ALLO', 'BANTEN', 'BRI', 'BCA', 'JAGO', 'ARTOS', 'DANA', 'SHOPEE', 'NEO', 'SEA', 'KESEJAHTERAAN_EKONOMI', 'GOPAY', 'YUDHA_BHAKTI']
                     
                     for _, row in df_approved.iterrows():
                         bank_code = str(row.get('BANK', '')).strip()
@@ -366,11 +362,45 @@ if check_login():
                     df_x = pd.DataFrame(xendit_list)
                     df_f = pd.DataFrame(finlink_list)
                     
-                    st.success(f"✅ Selesai! Berhasil menemukan tabel dan memproses **{len(df_approved)}** data disetujui.")
+                    # --- SUMMARY CARD DASHBOARD MINI (4 KARTU) ---
+                    x_amt = pd.to_numeric(df_x['Amount'], errors='coerce').sum() if len(df_x) > 0 else 0
+                    f_amt = pd.to_numeric(df_f['amount'], errors='coerce').sum() if len(df_f) > 0 else 0
+                    s_amt = pd.to_numeric(df_skipped['JUMLAH DITRANSFER'], errors='coerce').sum() if len(df_skipped) > 0 else 0
                     
+                    total_success_count = len(df_x) + len(df_f)
+                    total_success_amt = x_amt + f_amt
+                    
+                    st.success(f"✅ Selesai! Tabel berhasil terbaca.")
+                    
+                    st.markdown(f"""
+                    <div style="display: flex; gap: 15px; margin-top: 15px; margin-bottom: 25px;">
+                        <div style="flex: 1; background: linear-gradient(135deg, #10b981 0%, #047857 100%); color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(16,185,129,0.2);">
+                            <h4 style="margin:0; font-size:15px; color:#d1fae5;">🌟 Total Berhasil</h4>
+                            <h2 style="margin:10px 0 0 0; font-size:28px;">{total_success_count} <span style="font-size:13px; font-weight:normal;">Data</span></h2>
+                            <div style="margin-top:5px; font-size:16px; font-weight:600;">{format_rp(total_success_amt)}</div>
+                        </div>
+                        <div style="flex: 1; background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(14,165,233,0.2);">
+                            <h4 style="margin:0; font-size:15px; color:#e0f2fe;">🟦 Xendit</h4>
+                            <h2 style="margin:10px 0 0 0; font-size:28px;">{len(df_x)} <span style="font-size:13px; font-weight:normal;">Data</span></h2>
+                            <div style="margin-top:5px; font-size:16px; font-weight:600;">{format_rp(x_amt)}</div>
+                        </div>
+                        <div style="flex: 1; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(249,115,22,0.2);">
+                            <h4 style="margin:0; font-size:15px; color:#ffedd5;">🟧 Finlink</h4>
+                            <h2 style="margin:10px 0 0 0; font-size:28px;">{len(df_f)} <span style="font-size:13px; font-weight:normal;">Data</span></h2>
+                            <div style="margin-top:5px; font-size:16px; font-weight:600;">{format_rp(f_amt)}</div>
+                        </div>
+                        <div style="flex: 1; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(239,68,68,0.2);">
+                            <h4 style="margin:0; font-size:15px; color:#fee2e2;">⚠️ Gagal/Skip</h4>
+                            <h2 style="margin:10px 0 0 0; font-size:28px;">{len(df_skipped)} <span style="font-size:13px; font-weight:normal;">Data</span></h2>
+                            <div style="margin-top:5px; font-size:16px; font-weight:600;">{format_rp(s_amt)}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    # --- END SUMMARY CARD ---
+
                     c_x, c_f = st.columns(2)
                     with c_x:
-                        st.markdown(f"#### 🟦 Gateway Xendit ({len(df_x)} Data)")
+                        st.markdown(f"#### 🟦 Gateway Xendit")
                         if len(df_x) > 0:
                             st.dataframe(df_x.head(3))
                             excel_x = convert_df_to_excel(df_x)
@@ -378,7 +408,7 @@ if check_login():
                         else: st.info("Tidak ada transaksi untuk Xendit.")
                             
                     with c_f:
-                        st.markdown(f"#### 🟧 Gateway Finlink ({len(df_f)} Data)")
+                        st.markdown(f"#### 🟧 Gateway Finlink")
                         if len(df_f) > 0:
                             st.dataframe(df_f.head(3))
                             excel_f = convert_df_to_excel(df_f)
@@ -387,7 +417,7 @@ if check_login():
                             
                     if len(df_skipped) > 0:
                         st.markdown("---")
-                        st.warning(f"⚠️ **PENGABAIAN DATA:** Terdapat **{len(df_skipped)}** baris data yang di-skip karena status belum disetujui.")
+                        st.warning("⚠️ **Rincian Data yang Di-skip (Belum Disetujui):**")
                         st.dataframe(df_skipped[['ID KASBON', 'NAMA', 'JUMLAH DITRANSFER', 'STATUS']])
             
             except Exception as e:
