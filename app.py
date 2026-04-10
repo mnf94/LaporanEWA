@@ -1,4 +1,7 @@
 import streamlit as st
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
@@ -293,6 +296,58 @@ if check_login():
             st.text_area("📋 Copy Kode HTML Laporan:", value=html_output, height=150)
             st.components.v1.html(html_output, height=1000, scrolling=True)
 
+
+# ==========================================
+            # FITUR BARU: KIRIM LAPORAN VIA EMAIL
+            # ==========================================
+            st.markdown("---")
+            st.markdown("### 📧 Kirim Laporan via Email")
+            
+            # Menyiapkan daftar To dan CC sesuai permintaan (bisa diedit di UI nanti)
+            default_to = "Ruth Astri <ruth.astri@byru.id>, Faqi <m.nurfaqi@byru.id>, Andrew Leo <andrew@byru.id>, Vincent Kane <vincent.kane@byru.id>"
+            default_cc = "Krisna Ardiansah <cikal.rafif@byru.id>, citra ayu ningrum <citra.ayu@byru.id>, arief indiarto <arief.indiarto@finfleet.id>, Farrell Abdullah Farhan <farrell.farhan@finfleet.id>, ugun rohana <ugun.rohana@finfleet.id>, Irfandu Tria Asmara <irfandu.triaasmara@finfleet.id>"
+
+            with st.form("email_form"):
+                email_tujuan = st.text_area("Kirim ke (To):", value=default_to, height=80)
+                email_tembusan = st.text_area("Tembusan (CC):", value=default_cc, height=100)
+                judul_email = st.text_input("Judul Email:", value=f"Laporan EWA Hari ini {tanggal_laporan} - (Automation)")
+                
+                kirim_email_btn = st.form_submit_button("🚀 Kirim Laporan ke Semua Tim", type="primary")
+
+            if kirim_email_btn:
+                try:
+                    # MENGAMBIL KREDENSIAL DARI SECRETS.TOML
+                    email_pengirim = st.secrets["email"]["sender"]
+                    app_password = st.secrets["email"]["password"]
+                    
+                    # Jika menggunakan st.secrets, gunakan baris di bawah ini dan hapus 2 baris di atas:
+                    # email_pengirim = st.secrets["email"]["sender"]
+                    # app_password = st.secrets["email"]["password"]
+
+                    # SETUP STRUKTUR PESAN
+                    pesan = MIMEMultipart()
+                    pesan['From'] = email_pengirim
+                    pesan['To'] = email_tujuan
+                    pesan['Cc'] = email_tembusan
+                    pesan['Subject'] = judul_email
+
+                    # Attach HTML ke Body Email
+                    pesan.attach(MIMEText(html_output, 'html'))
+
+                    # PROSES PENGIRIMAN
+                    with st.spinner("Sedang mengirim email ke tim... Mohon tunggu..."):
+                        server = smtplib.SMTP('smtp.gmail.com', 587)
+                        server.starttls()
+                        server.login(email_pengirim, app_password)
+                        
+                        # Python send_message secara otomatis membaca 'To', 'Cc', dan 'Bcc' dari objek pesan
+                        server.send_message(pesan)
+                        server.quit()
+                    
+                    st.success("✅ Email berhasil dikirim ke seluruh tim terkait!")
+
+                except Exception as e:
+                    st.error(f"❌ Terjadi kesalahan saat mengirim email: {e}")
 
     # --- MENU 2: PROSES DATA EWA ---
     elif menu_selection == "⚙️ Proses EWA (Mapping)":
