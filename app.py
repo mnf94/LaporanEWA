@@ -118,6 +118,20 @@ def safe_int(value, default=0):
         return int(float(value))
     except: return default
 
+def get_first_row_value(row, column_names, default=""):
+    for column_name in column_names:
+        value = row.get(column_name, "")
+        if pd.notna(value) and str(value).strip():
+            return str(value).strip()
+    return default
+
+def build_ewa_description(row):
+    jenis_pengajuan = get_first_row_value(row, ["JENIS PENGAJUAN", "JENIS", "TYPE", "TIPE"])
+    nama_pt = get_first_row_value(row, ["NAMA PT", "PT", "PERUSAHAAN", "COMPANY"])
+    keterangan = get_first_row_value(row, ["KETERANGAN AMBIL EWA", "KETERANGAN", "KEBUTUHAN", "TUJUAN"])
+    description_parts = ["EWA", jenis_pengajuan, nama_pt, keterangan]
+    return "_".join(part for part in description_parts if part)
+
 def parse_email_recipients(raw_value):
     raw_value = (raw_value or "").replace("\n", ",")
     recipients = []
@@ -470,17 +484,18 @@ if check_login():
                     
                     xendit_list = []
                     finlink_list = []
-                    xendit_kws = ['OCBC', 'BSI', 'ALLO', 'BANTEN', 'BRI', 'BCA', 'JAGO', 'ARTOS', 'DANA', 'SHOPEE', 'NEO', 'SEA', 'KESEJAHTERAAN_EKONOMI', 'GOPAY', 'YUDHA_BHAKTI']
+                    xendit_kws = ['OCBC', 'BSI', 'ALLO', 'BANTEN', 'JAGO', 'ARTOS', 'DANA', 'OVO', 'SHOPEE', 'NEO', 'SEA', 'KESEJAHTERAAN_EKONOMI', 'GOPAY', 'YUDHA_BHAKTI']
                     
                     for _, row in df_approved.iterrows():
                         bank_code = str(row.get('BANK', '')).strip()
                         is_xendit = any(kw in bank_code.upper() for kw in xendit_kws)
+                        ewa_description = build_ewa_description(row)
                         
                         if is_xendit:
                             xendit_list.append({
                                 'Reference Id': row.get('ID KASBON', ''), 'Amount': row.get('JUMLAH DITRANSFER', ''),
                                 'Channel Code': bank_code, 'Account Number': row.get('NO. REKENING', ''),
-                                'Account Name': row.get('ATAS NAMA', ''), 'Description': row.get('KETERANGAN', ''),
+                                'Account Name': row.get('ATAS NAMA', ''), 'Description': ewa_description,
                                 'Email To': row.get('EMAIL', ''), 'Email CC': '', 'Email BCC': ''
                             })
                         else:
@@ -489,7 +504,7 @@ if check_login():
                                 'reference_id': row.get('ID KASBON', ''), 'account_no': row.get('NO. REKENING', ''),
                                 'account_name': row.get('ATAS NAMA', ''), 'bank_name': finlink_info['finlink_name'],
                                 'bank_code': finlink_info['finlink_code'], 'amount': row.get('JUMLAH DITRANSFER', ''),
-                                'status': '', 'description': row.get('KETERANGAN', ''), 'email_to': row.get('EMAIL', ''),
+                                'status': '', 'description': ewa_description, 'email_to': row.get('EMAIL', ''),
                                 'email_cc': '', 'email_bcc': ''
                             })
                             
