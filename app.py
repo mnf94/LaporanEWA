@@ -450,7 +450,7 @@ if check_login():
         
         uploaded_file = st.file_uploader("Upload File Raw EWA (.xlsx atau .csv)", type=['xlsx', 'csv'])
         direct_to_xendit = st.toggle(
-            "Direct Ke PG Xendit",
+            "Aktifkan Tombol ini, Kalau mau semua transaksi Direct kirim Ke PG Xendit Templatenya",
             value=False,
             help="Aktifkan saat Finlink gangguan. Semua transaksi yang disetujui akan masuk ke template Xendit."
         )
