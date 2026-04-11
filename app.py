@@ -2,6 +2,7 @@ import streamlit as st
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.utils import formataddr, getaddresses, parseaddr
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
@@ -116,6 +117,65 @@ def safe_int(value, default=0):
         if value is None or str(value).strip() == "": return default
         return int(float(value))
     except: return default
+
+def parse_email_recipients(raw_value):
+    raw_value = (raw_value or "").replace("\n", ",")
+    recipients = []
+    seen = set()
+    for name, address in getaddresses([raw_value]):
+        address = (address or "").strip()
+        if not address or "@" not in address:
+            continue
+        key = address.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        recipients.append((name.strip(), address))
+    return recipients
+
+def format_email_header(recipients):
+    return ", ".join(
+        formataddr((name, address)) if name else address
+        for name, address in recipients
+    )
+
+def get_email_credentials():
+    if "email" not in st.secrets:
+        raise RuntimeError("Secrets belum punya section [email].")
+
+    sender = str(st.secrets["email"].get("sender", "")).strip()
+    password = str(st.secrets["email"].get("password", "")).replace(" ", "").strip()
+
+    if not sender or "@" not in parseaddr(sender)[1]:
+        raise RuntimeError("Secrets email.sender kosong atau format email tidak valid.")
+    if not password:
+        raise RuntimeError("Secrets email.password kosong.")
+
+    return parseaddr(sender)[1], password
+
+def send_report_email(sender, app_password, to_recipients, cc_recipients, subject, html_body):
+    all_recipients = [address for _, address in (to_recipients + cc_recipients)]
+    if not to_recipients:
+        raise RuntimeError("Minimal isi satu alamat email di kolom To.")
+    if not all_recipients:
+        raise RuntimeError("Tidak ada alamat tujuan valid yang bisa dikirim.")
+
+    message = MIMEMultipart()
+    message["From"] = sender
+    message["To"] = format_email_header(to_recipients)
+    if cc_recipients:
+        message["Cc"] = format_email_header(cc_recipients)
+    message["Subject"] = subject
+    message.attach(MIMEText(html_body, "html", "utf-8"))
+
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(sender, app_password)
+        server.send_message(message, from_addr=sender, to_addrs=all_recipients)
+
+    return len(all_recipients)
 
 def convert_df_to_excel(df):
     output = io.BytesIO()
@@ -316,36 +376,29 @@ if check_login():
 
             if kirim_email_btn:
                 try:
-                    # MENGAMBIL KREDENSIAL DARI SECRETS.TOML
-                    email_pengirim = st.secrets["email"]["sender"]
-                    app_password = st.secrets["email"]["password"]
+                    email_pengirim, app_password = get_email_credentials()
+                    to_recipients = parse_email_recipients(email_tujuan)
+                    cc_recipients = parse_email_recipients(email_tembusan)
                     
-                    # Jika menggunakan st.secrets, gunakan baris di bawah ini dan hapus 2 baris di atas:
-                    # email_pengirim = st.secrets["email"]["sender"]
-                    # app_password = st.secrets["email"]["password"]
-
-                    # SETUP STRUKTUR PESAN
-                    pesan = MIMEMultipart()
-                    pesan['From'] = email_pengirim
-                    pesan['To'] = email_tujuan
-                    pesan['Cc'] = email_tembusan
-                    pesan['Subject'] = judul_email
-
-                    # Attach HTML ke Body Email
-                    pesan.attach(MIMEText(html_output, 'html'))
-
                     # PROSES PENGIRIMAN
                     with st.spinner("Sedang mengirim email ke tim... Mohon tunggu..."):
-                        server = smtplib.SMTP('smtp.gmail.com', 587)
-                        server.starttls()
-                        server.login(email_pengirim, app_password)
-                        
-                        # Python send_message secara otomatis membaca 'To', 'Cc', dan 'Bcc' dari objek pesan
-                        server.send_message(pesan)
-                        server.quit()
+                        total_terkirim = send_report_email(
+                            email_pengirim,
+                            app_password,
+                            to_recipients,
+                            cc_recipients,
+                            judul_email,
+                            html_output
+                        )
                     
-                    st.success("✅ Email berhasil dikirim ke seluruh tim terkait!")
+                    st.success(f"✅ Email berhasil dikirim ke {total_terkirim} penerima.")
 
+                except smtplib.SMTPAuthenticationError:
+                    st.error("Login Gmail ditolak. Cek email pengirim, app password 16 karakter, dan pastikan 2-Step Verification aktif di akun Google.")
+                except smtplib.SMTPRecipientsRefused as e:
+                    st.error(f"Gmail menolak alamat penerima: {e.recipients}")
+                except smtplib.SMTPException as e:
+                    st.error(f"SMTP Gmail gagal: {e}")
                 except Exception as e:
                     st.error(f"❌ Terjadi kesalahan saat mengirim email: {e}")
 
