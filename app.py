@@ -449,6 +449,13 @@ if check_login():
         st.info("Upload file Data Raw EWA Anda. Sistem otomatis membaca tabel (mengabaikan baris kosong/judul), memisahkan transaksi ke **Xendit** & **Finlink**, serta menyingkirkan status yang belum disetujui.")
         
         uploaded_file = st.file_uploader("Upload File Raw EWA (.xlsx atau .csv)", type=['xlsx', 'csv'])
+        direct_to_xendit = st.toggle(
+            "Direct Ke PG Xendit",
+            value=False,
+            help="Aktifkan saat Finlink gangguan. Semua transaksi yang disetujui akan masuk ke template Xendit."
+        )
+        if direct_to_xendit:
+            st.warning("Mode Direct Ke PG Xendit aktif. Semua transaksi DISETUJUI ATASAN akan diarahkan ke Xendit, termasuk yang biasanya masuk Finlink.")
         
         if uploaded_file:
             try:
@@ -488,7 +495,7 @@ if check_login():
                     
                     for _, row in df_approved.iterrows():
                         bank_code = str(row.get('BANK', '')).strip()
-                        is_xendit = any(kw in bank_code.upper() for kw in xendit_kws)
+                        is_xendit = direct_to_xendit or any(kw in bank_code.upper() for kw in xendit_kws)
                         ewa_description = build_ewa_description(row)
                         
                         if is_xendit:
