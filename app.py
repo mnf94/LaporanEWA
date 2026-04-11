@@ -2,7 +2,7 @@ import streamlit as st
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from email.utils import formataddr, getaddresses, parseaddr
+from email.utils import formataddr, formatdate, getaddresses, make_msgid, parseaddr
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
@@ -154,28 +154,90 @@ def get_email_credentials():
     return parseaddr(sender)[1], password
 
 def send_report_email(sender, app_password, to_recipients, cc_recipients, subject, html_body):
+    sender_address = parseaddr(sender)[1]
     all_recipients = [address for _, address in (to_recipients + cc_recipients)]
     if not to_recipients:
         raise RuntimeError("Minimal isi satu alamat email di kolom To.")
     if not all_recipients:
         raise RuntimeError("Tidak ada alamat tujuan valid yang bisa dikirim.")
 
-    message = MIMEMultipart()
-    message["From"] = sender
+    message = MIMEMultipart("alternative")
+    message["From"] = formataddr(("EWA Automator", sender_address))
     message["To"] = format_email_header(to_recipients)
     if cc_recipients:
         message["Cc"] = format_email_header(cc_recipients)
     message["Subject"] = subject
+    message["Date"] = formatdate(localtime=True)
+    message["Message-ID"] = make_msgid(domain=sender_address.split("@")[-1])
+    message["Reply-To"] = sender_address
+
+    plain_body = (
+        "Laporan EWA sudah dibuat dalam format HTML.\n\n"
+        "Jika tampilan email tidak muncul sempurna, buka email ini dari Gmail desktop "
+        "atau gunakan kode HTML yang tersedia di aplikasi."
+    )
+    message.attach(MIMEText(plain_body, "plain", "utf-8"))
     message.attach(MIMEText(html_body, "html", "utf-8"))
 
     with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
         server.ehlo()
         server.starttls()
         server.ehlo()
-        server.login(sender, app_password)
-        server.send_message(message, from_addr=sender, to_addrs=all_recipients)
+        server.login(sender_address, app_password)
+        refused = server.sendmail(sender_address, all_recipients, message.as_string())
+
+    if refused:
+        raise smtplib.SMTPRecipientsRefused(refused)
 
     return len(all_recipients)
+
+def render_report_email_form(html_output, tanggal_laporan):
+    st.markdown("---")
+    st.markdown("### 📧 Kirim Laporan via Email")
+
+    default_to = "Ruth Astri <ruth.astri@byru.id>, Faqi <m.nurfaqi@byru.id>, Andrew Leo <andrew@byru.id>, Vincent Kane <vincent.kane@byru.id>"
+    default_cc = "Krisna Ardiansah <cikal.rafif@byru.id>, citra ayu ningrum <citra.ayu@byru.id>, arief indiarto <arief.indiarto@finfleet.id>, Farrell Abdullah Farhan <farrell.farhan@finfleet.id>, ugun rohana <ugun.rohana@finfleet.id>, Irfandu Tria Asmara <irfandu.triaasmara@finfleet.id>"
+
+    with st.form("email_form"):
+        email_tujuan = st.text_area("Kirim ke (To):", value=default_to, height=80)
+        email_tembusan = st.text_area("Tembusan (CC):", value=default_cc, height=100)
+        judul_email = st.text_input("Judul Email:", value=f"Laporan EWA Hari ini {tanggal_laporan} - (Automation)")
+
+        to_preview = parse_email_recipients(email_tujuan)
+        cc_preview = parse_email_recipients(email_tembusan)
+        st.caption(f"Alamat valid terdeteksi: {len(to_preview)} To + {len(cc_preview)} CC")
+
+        kirim_email_btn = st.form_submit_button("🚀 Kirim Laporan ke Semua Tim", type="primary")
+
+    if kirim_email_btn:
+        try:
+            email_pengirim, app_password = get_email_credentials()
+            to_recipients = parse_email_recipients(email_tujuan)
+            cc_recipients = parse_email_recipients(email_tembusan)
+
+            with st.spinner("Sedang mengirim email ke tim... Mohon tunggu..."):
+                total_terkirim = send_report_email(
+                    email_pengirim,
+                    app_password,
+                    to_recipients,
+                    cc_recipients,
+                    judul_email,
+                    html_output
+                )
+
+            st.success(f"✅ Email berhasil dikirim ke {total_terkirim} penerima dari {email_pengirim}.")
+            st.info("Kalau belum terlihat di inbox penerima, cek Sent Mail pengirim, Spam penerima, dan tunggu 1-2 menit karena Gmail kadang delay.")
+
+        except smtplib.SMTPAuthenticationError:
+            st.error("Login Gmail ditolak. Cek email pengirim, app password 16 karakter, dan pastikan 2-Step Verification aktif di akun Google.")
+        except smtplib.SMTPRecipientsRefused as e:
+            st.error(f"Gmail menolak alamat penerima: {e.recipients}")
+        except smtplib.SMTPSenderRefused as e:
+            st.error(f"Gmail menolak alamat pengirim: {e.sender} - {e.smtp_error}")
+        except smtplib.SMTPException as e:
+            st.error(f"SMTP Gmail gagal: {e}")
+        except Exception as e:
+            st.error(f"❌ Terjadi kesalahan saat mengirim email: {e}")
 
 def convert_df_to_excel(df):
     output = io.BytesIO()
@@ -355,52 +417,16 @@ if check_login():
             st.success("🎉 Laporan Eksekutif berhasil di-generate!")
             st.text_area("📋 Copy Kode HTML Laporan:", value=html_output, height=150)
             st.components.v1.html(html_output, height=1000, scrolling=True)
+            st.session_state["last_html_output"] = html_output
+            st.session_state["last_tanggal_laporan"] = tanggal_laporan
+            render_report_email_form(html_output, tanggal_laporan)
 
 
-# ==========================================
-            # FITUR BARU: KIRIM LAPORAN VIA EMAIL
-            # ==========================================
-            st.markdown("---")
-            st.markdown("### 📧 Kirim Laporan via Email")
-            
-            # Menyiapkan daftar To dan CC sesuai permintaan (bisa diedit di UI nanti)
-            default_to = "Ruth Astri <ruth.astri@byru.id>, Faqi <m.nurfaqi@byru.id>, Andrew Leo <andrew@byru.id>, Vincent Kane <vincent.kane@byru.id>"
-            default_cc = "Krisna Ardiansah <cikal.rafif@byru.id>, citra ayu ningrum <citra.ayu@byru.id>, arief indiarto <arief.indiarto@finfleet.id>, Farrell Abdullah Farhan <farrell.farhan@finfleet.id>, ugun rohana <ugun.rohana@finfleet.id>, Irfandu Tria Asmara <irfandu.triaasmara@finfleet.id>"
-
-            with st.form("email_form"):
-                email_tujuan = st.text_area("Kirim ke (To):", value=default_to, height=80)
-                email_tembusan = st.text_area("Tembusan (CC):", value=default_cc, height=100)
-                judul_email = st.text_input("Judul Email:", value=f"Laporan EWA Hari ini {tanggal_laporan} - (Automation)")
-                
-                kirim_email_btn = st.form_submit_button("🚀 Kirim Laporan ke Semua Tim", type="primary")
-
-            if kirim_email_btn:
-                try:
-                    email_pengirim, app_password = get_email_credentials()
-                    to_recipients = parse_email_recipients(email_tujuan)
-                    cc_recipients = parse_email_recipients(email_tembusan)
-                    
-                    # PROSES PENGIRIMAN
-                    with st.spinner("Sedang mengirim email ke tim... Mohon tunggu..."):
-                        total_terkirim = send_report_email(
-                            email_pengirim,
-                            app_password,
-                            to_recipients,
-                            cc_recipients,
-                            judul_email,
-                            html_output
-                        )
-                    
-                    st.success(f"✅ Email berhasil dikirim ke {total_terkirim} penerima.")
-
-                except smtplib.SMTPAuthenticationError:
-                    st.error("Login Gmail ditolak. Cek email pengirim, app password 16 karakter, dan pastikan 2-Step Verification aktif di akun Google.")
-                except smtplib.SMTPRecipientsRefused as e:
-                    st.error(f"Gmail menolak alamat penerima: {e.recipients}")
-                except smtplib.SMTPException as e:
-                    st.error(f"SMTP Gmail gagal: {e}")
-                except Exception as e:
-                    st.error(f"❌ Terjadi kesalahan saat mengirim email: {e}")
+        if not submitted and st.session_state.get("last_html_output"):
+            render_report_email_form(
+                st.session_state["last_html_output"],
+                st.session_state.get("last_tanggal_laporan", datetime.now().strftime('%d %B %Y'))
+            )
 
     # --- MENU 2: PROSES DATA EWA ---
     elif menu_selection == "⚙️ Proses EWA (Mapping)":
