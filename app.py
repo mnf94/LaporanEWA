@@ -2,6 +2,8 @@ import streamlit as st
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from email.utils import formataddr, formatdate, getaddresses, make_msgid, parseaddr
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -167,7 +169,7 @@ def get_email_credentials():
 
     return parseaddr(sender)[1], password
 
-def send_report_email(sender, app_password, to_recipients, cc_recipients, subject, html_body):
+def send_report_email(sender, app_password, to_recipients, cc_recipients, subject, html_body, attachments=None):
     sender_address = parseaddr(sender)[1]
     all_recipients = [address for _, address in (to_recipients + cc_recipients)]
     if not to_recipients:
@@ -175,7 +177,7 @@ def send_report_email(sender, app_password, to_recipients, cc_recipients, subjec
     if not all_recipients:
         raise RuntimeError("Tidak ada alamat tujuan valid yang bisa dikirim.")
 
-    message = MIMEMultipart("alternative")
+    message = MIMEMultipart("mixed")
     message["From"] = formataddr(("EWA Automator", sender_address))
     message["To"] = format_email_header(to_recipients)
     if cc_recipients:
@@ -190,8 +192,18 @@ def send_report_email(sender, app_password, to_recipients, cc_recipients, subjec
         "Jika tampilan email tidak muncul sempurna, buka email ini dari Gmail desktop "
         "atau gunakan kode HTML yang tersedia di aplikasi."
     )
-    message.attach(MIMEText(plain_body, "plain", "utf-8"))
-    message.attach(MIMEText(html_body, "html", "utf-8"))
+    body_part = MIMEMultipart("alternative")
+    body_part.attach(MIMEText(plain_body, "plain", "utf-8"))
+    body_part.attach(MIMEText(html_body, "html", "utf-8"))
+    message.attach(body_part)
+
+    if attachments:
+        for att in attachments:
+            part = MIMEBase("application", "octet-stream")
+            part.set_payload(att["data"])
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", f'attachment; filename="{att["name"]}"')
+            message.attach(part)
 
     with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as server:
         server.ehlo()
@@ -210,24 +222,38 @@ def render_report_email_form(html_output, tanggal_laporan):
     st.markdown("### 📧 Kirim Laporan via Email")
 
     default_to = "Ruth Astri <ruth.astri@byru.id>, Faqi <m.nurfaqi@byru.id>, Andrew Leo <andrew@byru.id>, Vincent Kane <vincent.kane@byru.id>"
-    default_cc = "Krisna Ardiansah <cikal.rafif@byru.id>, citra ayu ningrum <citra.ayu@byru.id>, arief indiarto <arief.indiarto@finfleet.id>, Farrell Abdullah Farhan <farrell.farhan@finfleet.id>, ugun rohana <ugun.rohana@finfleet.id>, Irfandu Tria Asmara <irfandu.triaasmara@finfleet.id>"
+    default_cc = "Krisna Ardiansah <cikal.rafif@byru.id>, citra ayu ningrum <citra.ayu@byru.id>, arief indiarto <arief.indiarto@finfleet.id>, Farrell Abdullah Farhan <farrell.farhan@finfleet.id>, ugun rohana <ugun.rohana@finfleet.id>, Irfandu Tria Asmara <irfandu.triaasmara@finfleet.id>, Wira Ariastama <wira.ariastama@byru.id>, Adi Prastowo <adi@finfleet.id>"
 
     with st.form("email_form"):
         email_tujuan = st.text_area("Kirim ke (To):", value=default_to, height=80)
-        email_tembusan = st.text_area("Tembusan (CC):", value=default_cc, height=100)
+        email_tembusan = st.text_area("Tembusan (CC):", value=default_cc, height=120)
         judul_email = st.text_input("Judul Email:", value=f"Laporan EWA Hari ini {tanggal_laporan} - (Automation)")
 
         to_preview = parse_email_recipients(email_tujuan)
         cc_preview = parse_email_recipients(email_tembusan)
         st.caption(f"Alamat valid terdeteksi: {len(to_preview)} To + {len(cc_preview)} CC")
 
-        kirim_email_btn = st.form_submit_button("🚀 Kirim Laporan ke Semua Tim", type="primary")
+        lampiran_files = st.file_uploader(
+            "📎 Upload Lampiran (opsional, bisa multiple):",
+            accept_multiple_files=True,
+            key="email_lampiran"
+        )
+        if lampiran_files:
+            st.caption(f"📎 {len(lampiran_files)} file siap dilampirkan: {', '.join(f.name for f in lampiran_files)}")
+
+        col_btn1, col_btn2 = st.columns([3, 1])
+        with col_btn1:
+            kirim_email_btn = st.form_submit_button("🚀 Kirim Laporan ke Semua Tim", type="primary", use_container_width=True)
 
     if kirim_email_btn:
         try:
             email_pengirim, app_password = get_email_credentials()
             to_recipients = parse_email_recipients(email_tujuan)
             cc_recipients = parse_email_recipients(email_tembusan)
+
+            attachments = None
+            if lampiran_files:
+                attachments = [{"name": f.name, "data": f.read()} for f in lampiran_files]
 
             with st.spinner("Sedang mengirim email ke tim... Mohon tunggu..."):
                 total_terkirim = send_report_email(
@@ -236,10 +262,12 @@ def render_report_email_form(html_output, tanggal_laporan):
                     to_recipients,
                     cc_recipients,
                     judul_email,
-                    html_output
+                    html_output,
+                    attachments=attachments
                 )
 
-            st.success(f"✅ Email berhasil dikirim ke {total_terkirim} penerima dari {email_pengirim}.")
+            lampiran_info = f" dengan {len(attachments)} lampiran" if attachments else ""
+            st.success(f"✅ Email berhasil dikirim ke {total_terkirim} penerima dari {email_pengirim}{lampiran_info}.")
             st.info("Kalau belum terlihat di inbox penerima, cek Sent Mail pengirim, Spam penerima, dan tunggu 1-2 menit karena Gmail kadang delay.")
 
         except smtplib.SMTPAuthenticationError:
