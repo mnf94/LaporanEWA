@@ -9,7 +9,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import json
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import pandas as pd
 import io
@@ -119,6 +119,57 @@ def safe_int(value, default=0):
         if value is None or str(value).strip() == "": return default
         return int(float(value))
     except: return default
+
+BULAN_ID = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"]
+BULAN_MAP = {b: f"{i+1:02d}" for i, b in enumerate(BULAN_ID)}
+
+def get_default_lm_periode():
+    last_day = datetime.now().replace(day=1) - timedelta(days=1)
+    return f"1 - {last_day.day} {BULAN_ID[last_day.month - 1]} {last_day.year}"
+
+def get_history_defaults(history):
+    """Deteksi pergantian bulan dan kembalikan default MTD & LM yang tepat."""
+    now = datetime.now()
+    now_key = now.strftime("%Y-%m")
+    saved_key = history.get("month_key", "")
+    if not saved_key:
+        ts = history.get("timestamp", "")
+        try:
+            parts = ts.split(" ")  # "13 April 2026 - 14:30:00 WIB"
+            if len(parts) >= 3:
+                saved_key = f"{parts[2]}-{BULAN_MAP.get(parts[1], '00')}"
+        except: pass
+
+    is_new = bool(saved_key) and saved_key != now_key
+    default_mtd_periode = f"1 - {now.day} {BULAN_ID[now.month - 1]} {now.year}"
+
+    if is_new:
+        # Bulan baru: MTD reset 0, LM diambil dari MTD bulan lalu
+        mtd = {"mtd_periode": default_mtd_periode, "mtd_qty_ewa": 0, "mtd_total_ewa": 0,
+               "mtd_admin": 0, "mtd_transfer": 0, "mtd_profit": 0, "mtd_xendit": 0,
+               "mtd_finlink": 0, "mtd_qty_ppob": 0, "mtd_ewa_ppob": 0, "mtd_admin_ppob": 0}
+        lm = {"lm_periode": history.get("mtd_periode", get_default_lm_periode()),
+              "lm_qty_ewa": safe_int(history.get("mtd_qty_ewa")), "lm_total_ewa": safe_int(history.get("mtd_total_ewa")),
+              "lm_admin": safe_int(history.get("mtd_admin")), "lm_transfer": safe_int(history.get("mtd_transfer")),
+              "lm_profit": safe_int(history.get("mtd_profit")), "lm_xendit": safe_int(history.get("mtd_xendit")),
+              "lm_finlink": safe_int(history.get("mtd_finlink")), "lm_qty_ppob": safe_int(history.get("mtd_qty_ppob")),
+              "lm_ewa_ppob": safe_int(history.get("mtd_ewa_ppob")), "lm_admin_ppob": safe_int(history.get("mtd_admin_ppob"))}
+    else:
+        # Bulan sama: load MTD & LM dari history seperti biasa
+        mtd = {"mtd_periode": history.get("mtd_periode", default_mtd_periode),
+               "mtd_qty_ewa": safe_int(history.get("mtd_qty_ewa")), "mtd_total_ewa": safe_int(history.get("mtd_total_ewa")),
+               "mtd_admin": safe_int(history.get("mtd_admin")), "mtd_transfer": safe_int(history.get("mtd_transfer")),
+               "mtd_profit": safe_int(history.get("mtd_profit")), "mtd_xendit": safe_int(history.get("mtd_xendit")),
+               "mtd_finlink": safe_int(history.get("mtd_finlink")), "mtd_qty_ppob": safe_int(history.get("mtd_qty_ppob")),
+               "mtd_ewa_ppob": safe_int(history.get("mtd_ewa_ppob")), "mtd_admin_ppob": safe_int(history.get("mtd_admin_ppob"))}
+        lm = {"lm_periode": history.get("lm_periode", get_default_lm_periode()),
+              "lm_qty_ewa": safe_int(history.get("lm_qty_ewa")), "lm_total_ewa": safe_int(history.get("lm_total_ewa")),
+              "lm_admin": safe_int(history.get("lm_admin")), "lm_transfer": safe_int(history.get("lm_transfer")),
+              "lm_profit": safe_int(history.get("lm_profit")), "lm_xendit": safe_int(history.get("lm_xendit")),
+              "lm_finlink": safe_int(history.get("lm_finlink")), "lm_qty_ppob": safe_int(history.get("lm_qty_ppob")),
+              "lm_ewa_ppob": safe_int(history.get("lm_ewa_ppob")), "lm_admin_ppob": safe_int(history.get("lm_admin_ppob"))}
+
+    return is_new, mtd, lm
 
 def get_first_row_value(row, column_names, default=""):
     for column_name in column_names:
@@ -331,6 +382,9 @@ if check_login():
     if menu_selection == "📊 Laporan Dashboard":
         db_sheet = connect_google_sheets()
         history = {}
+        is_new_month = False
+        mtd_def = {}
+        lm_def = {}
         if db_sheet is None: st.warning("⚠️ Google Sheets Belum Terhubung. Form berjalan tanpa histori.")
         else:
             st.success("✅ Terhubung ke Google Sheets! Data histori otomatis ditarik.")
@@ -338,7 +392,11 @@ if check_login():
                 records = db_sheet.get_all_records()
                 history = records[-1] if records else {}
             except: pass
-            if history.get("created_by", "-") != "-": st.info(f"🕒 **Laporan sebelumnya digenerate oleh:** `{history.get('created_by')}` | **Waktu:** `{history.get('timestamp')}`")
+            is_new_month, mtd_def, lm_def = get_history_defaults(history)
+            if history.get("created_by", "-") != "-":
+                st.info(f"🕒 **Laporan sebelumnya digenerate oleh:** `{history.get('created_by')}` | **Waktu:** `{history.get('timestamp')}`")
+            if is_new_month:
+                st.success("🔄 **Bulan baru terdeteksi!** Data Bulan Lalu otomatis diisi dari MTD bulan lalu. MTD direset ke 0.")
 
         with st.form("report_form"):
             st.markdown("### 📅 Informasi Umum")
@@ -374,38 +432,38 @@ if check_login():
                 saldo_finlink = st.number_input("Saldo PG Finlink (Rp)", value=None, min_value=0, format="%d", step=1)
 
             st.markdown("### 📈 3. Report Bulan Berjalan (MTD)")
-            mtd_periode = st.text_input("Periode MTD", value=history.get("mtd_periode", "1 - 20 Februari 2026"))
+            mtd_periode = st.text_input("Periode MTD", value=mtd_def.get("mtd_periode", f"1 - {datetime.now().day} {BULAN_ID[datetime.now().month-1]} {datetime.now().year}"))
             col6, col7, col8 = st.columns(3)
             with col6:
-                mtd_qty_ewa = st.number_input("MTD Qty EWA", value=safe_int(history.get("mtd_qty_ewa", 0)), min_value=0, format="%d")
-                mtd_total_ewa = st.number_input("MTD Total EWA (Rp)", value=safe_int(history.get("mtd_total_ewa", 0)), min_value=0, format="%d")
-                mtd_admin = st.number_input("MTD Biaya Admin (Rp)", value=safe_int(history.get("mtd_admin", 0)), min_value=0, format="%d")
-                mtd_transfer = st.number_input("MTD Biaya Transfer (Rp)", value=safe_int(history.get("mtd_transfer", 0)), min_value=0, format="%d")
+                mtd_qty_ewa = st.number_input("MTD Qty EWA", value=mtd_def.get("mtd_qty_ewa", 0), min_value=0, format="%d")
+                mtd_total_ewa = st.number_input("MTD Total EWA (Rp)", value=mtd_def.get("mtd_total_ewa", 0), min_value=0, format="%d")
+                mtd_admin = st.number_input("MTD Biaya Admin (Rp)", value=mtd_def.get("mtd_admin", 0), min_value=0, format="%d")
+                mtd_transfer = st.number_input("MTD Biaya Transfer (Rp)", value=mtd_def.get("mtd_transfer", 0), min_value=0, format="%d")
             with col7:
-                mtd_profit = st.number_input("MTD Profit (Rp)", value=safe_int(history.get("mtd_profit", 0)), min_value=0, format="%d")
-                mtd_xendit = st.number_input("MTD Trf Xendit (Rp)", value=safe_int(history.get("mtd_xendit", 0)), min_value=0, format="%d")
-                mtd_finlink = st.number_input("MTD Trf Finlink (Rp)", value=safe_int(history.get("mtd_finlink", 0)), min_value=0, format="%d")
+                mtd_profit = st.number_input("MTD Profit (Rp)", value=mtd_def.get("mtd_profit", 0), min_value=0, format="%d")
+                mtd_xendit = st.number_input("MTD Trf Xendit (Rp)", value=mtd_def.get("mtd_xendit", 0), min_value=0, format="%d")
+                mtd_finlink = st.number_input("MTD Trf Finlink (Rp)", value=mtd_def.get("mtd_finlink", 0), min_value=0, format="%d")
             with col8:
-                mtd_qty_ppob = st.number_input("MTD Qty PPOB", value=safe_int(history.get("mtd_qty_ppob", 0)), min_value=0, format="%d")
-                mtd_ewa_ppob = st.number_input("MTD EWA PPOB (Rp)", value=safe_int(history.get("mtd_ewa_ppob", 0)), min_value=0, format="%d")
-                mtd_admin_ppob = st.number_input("MTD Admin PPOB (Rp)", value=safe_int(history.get("mtd_admin_ppob", 0)), min_value=0, format="%d")
+                mtd_qty_ppob = st.number_input("MTD Qty PPOB", value=mtd_def.get("mtd_qty_ppob", 0), min_value=0, format="%d")
+                mtd_ewa_ppob = st.number_input("MTD EWA PPOB (Rp)", value=mtd_def.get("mtd_ewa_ppob", 0), min_value=0, format="%d")
+                mtd_admin_ppob = st.number_input("MTD Admin PPOB (Rp)", value=mtd_def.get("mtd_admin_ppob", 0), min_value=0, format="%d")
 
             st.markdown("### 🔙 4. Report Bulan Lalu")
-            lm_periode = st.text_input("Periode Bulan Lalu", value=history.get("lm_periode", "1 - 31 Januari 2026"))
+            lm_periode = st.text_input("Periode Bulan Lalu", value=lm_def.get("lm_periode", get_default_lm_periode()))
             col9, col10, col11 = st.columns(3)
             with col9:
-                lm_qty_ewa = st.number_input("LM Qty EWA", value=safe_int(history.get("lm_qty_ewa", 0)), min_value=0, format="%d")
-                lm_total_ewa = st.number_input("LM Total EWA (Rp)", value=safe_int(history.get("lm_total_ewa", 0)), min_value=0, format="%d")
-                lm_admin = st.number_input("LM Biaya Admin (Rp)", value=safe_int(history.get("lm_admin", 0)), min_value=0, format="%d")
-                lm_transfer = st.number_input("LM Biaya Transfer (Rp)", value=safe_int(history.get("lm_transfer", 0)), min_value=0, format="%d")
+                lm_qty_ewa = st.number_input("LM Qty EWA", value=lm_def.get("lm_qty_ewa", 0), min_value=0, format="%d")
+                lm_total_ewa = st.number_input("LM Total EWA (Rp)", value=lm_def.get("lm_total_ewa", 0), min_value=0, format="%d")
+                lm_admin = st.number_input("LM Biaya Admin (Rp)", value=lm_def.get("lm_admin", 0), min_value=0, format="%d")
+                lm_transfer = st.number_input("LM Biaya Transfer (Rp)", value=lm_def.get("lm_transfer", 0), min_value=0, format="%d")
             with col10:
-                lm_profit = st.number_input("LM Profit (Rp)", value=safe_int(history.get("lm_profit", 0)), min_value=0, format="%d")
-                lm_xendit = st.number_input("LM Trf Xendit (Rp)", value=safe_int(history.get("lm_xendit", 0)), min_value=0, format="%d")
-                lm_finlink = st.number_input("LM Trf Finlink (Rp)", value=safe_int(history.get("lm_finlink", 0)), min_value=0, format="%d")
+                lm_profit = st.number_input("LM Profit (Rp)", value=lm_def.get("lm_profit", 0), min_value=0, format="%d")
+                lm_xendit = st.number_input("LM Trf Xendit (Rp)", value=lm_def.get("lm_xendit", 0), min_value=0, format="%d")
+                lm_finlink = st.number_input("LM Trf Finlink (Rp)", value=lm_def.get("lm_finlink", 0), min_value=0, format="%d")
             with col11:
-                lm_qty_ppob = st.number_input("LM Qty PPOB", value=safe_int(history.get("lm_qty_ppob", 0)), min_value=0, format="%d")
-                lm_ewa_ppob = st.number_input("LM EWA PPOB (Rp)", value=safe_int(history.get("lm_ewa_ppob", 0)), min_value=0, format="%d")
-                lm_admin_ppob = st.number_input("LM Admin PPOB (Rp)", value=safe_int(history.get("lm_admin_ppob", 0)), min_value=0, format="%d")
+                lm_qty_ppob = st.number_input("LM Qty PPOB", value=lm_def.get("lm_qty_ppob", 0), min_value=0, format="%d")
+                lm_ewa_ppob = st.number_input("LM EWA PPOB (Rp)", value=lm_def.get("lm_ewa_ppob", 0), min_value=0, format="%d")
+                lm_admin_ppob = st.number_input("LM Admin PPOB (Rp)", value=lm_def.get("lm_admin_ppob", 0), min_value=0, format="%d")
 
             submitted = st.form_submit_button("🚀 Buat Laporan HTML Sekarang!", type="primary")
 
@@ -416,7 +474,7 @@ if check_login():
             saldo_pelangi = safe_int(saldo_pelangi); saldo_uv = safe_int(saldo_uv); saldo_xendit = safe_int(saldo_xendit); saldo_finlink = safe_int(saldo_finlink)
 
             if db_sheet is not None:
-                new_hist = {"created_by": st.session_state["username"], "timestamp": get_current_time_wib(), "mtd_periode": mtd_periode, "mtd_qty_ewa": mtd_qty_ewa, "mtd_total_ewa": mtd_total_ewa, "mtd_admin": mtd_admin, "mtd_transfer": mtd_transfer, "mtd_profit": mtd_profit, "mtd_xendit": mtd_xendit, "mtd_finlink": mtd_finlink, "mtd_qty_ppob": mtd_qty_ppob, "mtd_ewa_ppob": mtd_ewa_ppob, "mtd_admin_ppob": mtd_admin_ppob, "lm_periode": lm_periode, "lm_qty_ewa": lm_qty_ewa, "lm_total_ewa": lm_total_ewa, "lm_admin": lm_admin, "lm_transfer": lm_transfer, "lm_profit": lm_profit, "lm_xendit": lm_xendit, "lm_finlink": lm_finlink, "lm_qty_ppob": lm_qty_ppob, "lm_ewa_ppob": lm_ewa_ppob, "lm_admin_ppob": lm_admin_ppob}
+                new_hist = {"created_by": st.session_state["username"], "timestamp": get_current_time_wib(), "month_key": datetime.now().strftime("%Y-%m"), "mtd_periode": mtd_periode, "mtd_qty_ewa": mtd_qty_ewa, "mtd_total_ewa": mtd_total_ewa, "mtd_admin": mtd_admin, "mtd_transfer": mtd_transfer, "mtd_profit": mtd_profit, "mtd_xendit": mtd_xendit, "mtd_finlink": mtd_finlink, "mtd_qty_ppob": mtd_qty_ppob, "mtd_ewa_ppob": mtd_ewa_ppob, "mtd_admin_ppob": mtd_admin_ppob, "lm_periode": lm_periode, "lm_qty_ewa": lm_qty_ewa, "lm_total_ewa": lm_total_ewa, "lm_admin": lm_admin, "lm_transfer": lm_transfer, "lm_profit": lm_profit, "lm_xendit": lm_xendit, "lm_finlink": lm_finlink, "lm_qty_ppob": lm_qty_ppob, "lm_ewa_ppob": lm_ewa_ppob, "lm_admin_ppob": lm_admin_ppob}
                 try:
                     if len(db_sheet.get_all_values()) == 0: db_sheet.append_row(list(new_hist.keys()))
                     db_sheet.append_row(list(new_hist.values()))
