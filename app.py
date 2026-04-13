@@ -388,10 +388,27 @@ if check_login():
 
         if not st.session_state["gs_loaded"]:
             _history, _mtd_def, _lm_def, _is_new_month, _gs_ok = {}, {}, {}, False, False
+            HIST_COLS = ["created_by","timestamp","month_key","mtd_periode","mtd_qty_ewa","mtd_total_ewa",
+                         "mtd_admin","mtd_transfer","mtd_profit","mtd_xendit","mtd_finlink","mtd_qty_ppob",
+                         "mtd_ewa_ppob","mtd_admin_ppob","lm_periode","lm_qty_ewa","lm_total_ewa",
+                         "lm_admin","lm_transfer","lm_profit","lm_xendit","lm_finlink","lm_qty_ppob",
+                         "lm_ewa_ppob","lm_admin_ppob"]
             if db_sheet is not None:
                 try:
-                    records = db_sheet.get_all_records()
-                    _history = records[-1] if records else {}
+                    all_vals = db_sheet.get_all_values()
+                    # Cari baris pertama yang tidak kosong
+                    headers, data_start = HIST_COLS, 0
+                    for i, row in enumerate(all_vals):
+                        if any(str(v).strip() for v in row):
+                            if "created_by" in row:
+                                headers = row          # pakai header dari sheet
+                                data_start = i + 1
+                            else:
+                                data_start = i         # data langsung tanpa header
+                            break
+                    data_rows = [r for r in all_vals[data_start:] if any(str(v).strip() for v in r)]
+                    if data_rows:
+                        _history = dict(zip(headers, data_rows[-1]))
                     _is_new_month, _mtd_def, _lm_def = get_history_defaults(_history)
                     _gs_ok = True
                 except: pass
@@ -497,8 +514,8 @@ if check_login():
             if db_sheet is not None:
                 new_hist = {"created_by": st.session_state["username"], "timestamp": get_current_time_wib(), "month_key": datetime.now().strftime("%Y-%m"), "mtd_periode": mtd_periode, "mtd_qty_ewa": mtd_qty_ewa, "mtd_total_ewa": mtd_total_ewa, "mtd_admin": mtd_admin, "mtd_transfer": mtd_transfer, "mtd_profit": mtd_profit, "mtd_xendit": mtd_xendit, "mtd_finlink": mtd_finlink, "mtd_qty_ppob": mtd_qty_ppob, "mtd_ewa_ppob": mtd_ewa_ppob, "mtd_admin_ppob": mtd_admin_ppob, "lm_periode": lm_periode, "lm_qty_ewa": lm_qty_ewa, "lm_total_ewa": lm_total_ewa, "lm_admin": lm_admin, "lm_transfer": lm_transfer, "lm_profit": lm_profit, "lm_xendit": lm_xendit, "lm_finlink": lm_finlink, "lm_qty_ppob": lm_qty_ppob, "lm_ewa_ppob": lm_ewa_ppob, "lm_admin_ppob": lm_admin_ppob}
                 try:
-                    if len(db_sheet.get_all_values()) == 0: db_sheet.append_row(list(new_hist.keys()))
                     db_sheet.append_row(list(new_hist.values()))
+                    st.session_state["gs_loaded"] = False  # force reload supaya data terbaru keambil
                 except: pass
 
             avg_ewa_per_trx = total_ewa / qty_ewa if qty_ewa > 0 else 0
