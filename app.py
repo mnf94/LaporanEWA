@@ -381,22 +381,43 @@ if check_login():
     # --- MENU 1: LAPORAN DASHBOARD ---
     if menu_selection == "📊 Laporan Dashboard":
         db_sheet = connect_google_sheets()
-        history = {}
-        is_new_month = False
-        mtd_def = {}
-        lm_def = {}
-        if db_sheet is None: st.warning("⚠️ Google Sheets Belum Terhubung. Form berjalan tanpa histori.")
-        else:
-            st.success("✅ Terhubung ke Google Sheets! Data histori otomatis ditarik.")
-            try:
-                records = db_sheet.get_all_records()
-                history = records[-1] if records else {}
-            except: pass
-            is_new_month, mtd_def, lm_def = get_history_defaults(history)
-            if history.get("created_by", "-") != "-":
-                st.info(f"🕒 **Laporan sebelumnya digenerate oleh:** `{history.get('created_by')}` | **Waktu:** `{history.get('timestamp')}`")
-            if is_new_month:
-                st.success("🔄 **Bulan baru terdeteksi!** Data Bulan Lalu otomatis diisi dari MTD bulan lalu. MTD direset ke 0.")
+
+        # Cache data dari spreadsheet agar tidak reconnect tiap interaksi kecil di form
+        if "gs_loaded" not in st.session_state:
+            st.session_state["gs_loaded"] = False
+
+        if not st.session_state["gs_loaded"]:
+            _history, _mtd_def, _lm_def, _is_new_month, _gs_ok = {}, {}, {}, False, False
+            if db_sheet is not None:
+                try:
+                    records = db_sheet.get_all_records()
+                    _history = records[-1] if records else {}
+                    _is_new_month, _mtd_def, _lm_def = get_history_defaults(_history)
+                    _gs_ok = True
+                except: pass
+            st.session_state.update({"gs_loaded": True, "gs_ok": _gs_ok, "gs_history": _history,
+                                     "gs_mtd_def": _mtd_def, "gs_lm_def": _lm_def, "gs_is_new_month": _is_new_month})
+
+        history = st.session_state.get("gs_history", {})
+        mtd_def = st.session_state.get("gs_mtd_def", {})
+        lm_def = st.session_state.get("gs_lm_def", {})
+        is_new_month = st.session_state.get("gs_is_new_month", False)
+        gs_ok = st.session_state.get("gs_ok", False)
+
+        col_status, col_reload = st.columns([5, 1])
+        with col_reload:
+            if st.button("🔄 Muat Ulang Data", use_container_width=True, help="Muat ulang data histori dari Google Sheets"):
+                st.session_state["gs_loaded"] = False
+                st.rerun()
+        with col_status:
+            if db_sheet is None or not gs_ok:
+                st.warning("⚠️ Google Sheets belum terhubung. Data Bulan Lalu tidak tersedia. Klik **🔄 Muat Ulang Data** untuk mencoba lagi.")
+            else:
+                st.success("✅ Terhubung ke Google Sheets! Data histori otomatis ditarik.")
+                if history.get("created_by", "-") != "-":
+                    st.info(f"🕒 **Laporan sebelumnya digenerate oleh:** `{history.get('created_by')}` | **Waktu:** `{history.get('timestamp')}`")
+                if is_new_month:
+                    st.success("🔄 **Bulan baru terdeteksi!** Data Bulan Lalu otomatis diisi dari MTD bulan lalu. MTD direset ke 0.")
 
         with st.form("report_form"):
             st.markdown("### 📅 Informasi Umum")
