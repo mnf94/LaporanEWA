@@ -117,7 +117,7 @@ def format_num(angka):
 def safe_int(value, default=0):
     try:
         if value is None or str(value).strip() == "": return default
-        return int(float(value))
+        return int(float(str(value).replace(",", "").replace(" ", "")))
     except: return default
 
 BULAN_ID = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"]
@@ -398,14 +398,21 @@ if check_login():
                     all_vals = db_sheet.get_all_values()
                     # Cari baris pertama yang tidak kosong
                     headers, data_start = HIST_COLS, 0
+                    header_row_idx = None
                     for i, row in enumerate(all_vals):
                         if any(str(v).strip() for v in row):
                             if "created_by" in row:
-                                headers = row          # pakai header dari sheet
+                                headers = row          # sudah ada header di sheet
                                 data_start = i + 1
+                                header_row_idx = i
                             else:
                                 data_start = i         # data langsung tanpa header
                             break
+                    # Kalau belum ada header sama sekali, tulis header ke baris 1 sheet
+                    if header_row_idx is None:
+                        db_sheet.insert_row(HIST_COLS, index=1)
+                        all_vals = [HIST_COLS] + [r for r in all_vals if any(str(v).strip() for v in r)]
+                        data_start = 1
                     data_rows = [r for r in all_vals[data_start:] if any(str(v).strip() for v in r)]
                     if data_rows:
                         _history = dict(zip(headers, data_rows[-1]))
